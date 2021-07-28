@@ -1,0 +1,4 @@
+[33m[info][0m  [2016-09-20 21:15:25.458881] Data worker is waiting for data on port 6004
+[33m[info][0m  [2016-09-20 21:15:25.458881] Data worker is waiting for commands on port 7004
+[32m[start][0m [2016-09-20 21:15:25.458881] Data worker is starting the event loop
+[31m[stop][0m  [2016-09-20 21:15:25.458881] Data worker stopped the event loop

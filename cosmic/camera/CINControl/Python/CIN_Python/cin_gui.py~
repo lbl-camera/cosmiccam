@@ -1,0 +1,7 @@
+#! /usr/bin/python
+# -*- coding: utf-8 -*-
+import time
+import socket
+import os 
+
+os.system('nice -n -19 /home/nsptycho/CINControl/QT/CINController/CINController')
