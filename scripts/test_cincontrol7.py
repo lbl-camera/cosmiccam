@@ -248,6 +248,19 @@ DEFAULT.children['iaserver'].load_conf_parser(StringIO(
     """
 ))
 
+exp_total = 0
+dark_total = 0
+
+current_total = 0
+
+exp_processed = 0
+dark_processed = 0
+
+buffer_max_size = 100 #this limits how many frames are stored in memory before writing to disk
+
+dataset_name = "dark_frames" #this will be either exp_frames or dark_frames
+
+frames_buffer = []
 
 class Grabber(object):
 
@@ -261,7 +274,8 @@ class Grabber(object):
         # self.scans = deque(maxlen=2)
         self.shape = pars['shape']
         self.scan = Scan(self.shape)
-        self.save_dir = ''
+        self.save_dir = '' 
+        self.fname = ''
         self.dnum_max = None
         self.enum_max = None
         self.dnum = 0
@@ -311,6 +325,18 @@ class Grabber(object):
                 # discard this one
                 if not self.scan_stopped:
                     self.scan.fbuffer.append((int(number), frame))
+
+                    frames_buffer.append(frame)
+                    index_list.append(int(number))
+
+                    if dataset_name == "dark_frames": dark_processed +=1
+                    else if dataset_name == "exp_frames": exp_processed +=1
+
+                    if len(frames_buffer) == buffer_max_size:
+                        write_data(self.fname, dataset_name, np.array(frames_buffer), np.array(index_list), current_total)
+                        frames_buffer = []
+                        index_list = []
+
         else:
             # This could probablu have been done cleaner with a Poller
             # But I rather have the GIL released with sleep instead
@@ -323,6 +349,18 @@ class Grabber(object):
                     time.sleep(slp)
                     continue
                 self.scan.fbuffer.append((int(number), frame))
+
+                frames_buffer.append(frame)
+                index_list.append(int(number))
+
+                if dataset_name == "dark_frames": dark_processed +=1
+                else if dataset_name == "exp_frames": exp_processed +=1
+
+                if len(frames_buffer) == buffer_max_size:
+                    write_data(self.fname, dataset_name, np.array(frames_buffer), np.array(index_list), current_total)
+                    frames_buffer = []
+                    index_list = []
+
         self.print_status("Stopped reading frames", 'blue')
         frame_socket.disconnect(addr)
 
@@ -442,16 +480,16 @@ class Grabber(object):
         # this could maybe be part of read_tcp
         fac = info.get('repetition', 1)
         fac *= info.get('isDoubleExp', 0) + 1
-        num_dark = info.get('dark_num_total', 0) * fac
-        num_exp = info.get('exp_num_total', 0) * fac
+        dark_total = info.get('dark_num_total', 0) * fac
+        exp_total = info.get('exp_num_total', 0) * fac
 
         ia_addr = self.pars['iaserver']['ia_addr']
         if ia_addr is not None:
-            scan = ClientScan('tcp://%s' % ia_addr, shape=self.shape, num_dark=num_dark, num_exp=num_exp)
+            scan = ClientScan('tcp://%s' % ia_addr, shape=self.shape, num_dark=dark_total, num_exp=exp_total)
             self.print_status("Flushing data to ZMQ Interaction Server %s" % ia_addr)
         else:
             self.print_status("Using disk to store frames")
-            scan = Scan(shape=self.shape, num_dark=num_dark, num_exp=num_exp)
+            scan = Scan(shape=self.shape, num_dark=dark_total, num_exp=exp_total)
 
         # scan.info_raw = info_raw  # uncomment to avoid display
         scan.info = info
@@ -475,6 +513,7 @@ class Grabber(object):
             scan.name = os.path.split(trunk)[1]
             self.print_status('Name: %s' % scan.name)
         self.save_dir = npath
+        self.fname = npath + "test.hdf"
 
     def on_start_capture(self, msg):
         scan = self.scan
@@ -482,10 +521,17 @@ class Grabber(object):
             scan.fbuffer = scan.dark.frames
             scan.dark.dir = self.save_dir
             self.scan_is_dark = False
+
+            dataset_name = "dark_frames"
+            current_total = dark_total
+
         else:
             scan.dark.is_full = True
             scan.exp.dir = self.save_dir
             scan.fbuffer = scan.exp.frames
+
+            dataset_name = "exp_frames"
+            current_total = exp_total
 
             # this event signals the scan to be ready for being processed
             scan.save_meta()
