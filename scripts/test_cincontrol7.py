@@ -15,6 +15,7 @@ import tifffile
 from cosmic.camera.fccd import FCCD
 from cosmic.utils import ScanInfo
 import json
+from io_control import write_data
 
 import gc
 import zmq
@@ -248,19 +249,19 @@ DEFAULT.children['iaserver'].load_conf_parser(StringIO(
     """
 ))
 
-exp_total = 0
-dark_total = 0
+shape=(980, 960)
+num_rows = shape[0] // 2
+num_adcs = shape[1] // 6
 
-current_total = 0
+ccd = FCCD(nrows=num_rows)
 
-exp_processed = 0
-dark_processed = 0
+def frame_to_image(frame):
 
-buffer_max_size = 100 #this limits how many frames are stored in memory before writing to disk
+    npbuf = np.frombuffer(frame, '<u2')
+    npbuf = npbuf.reshape((12 * num_rows, num_adcs))
+    image = ccd.assemble2(npbuf.astype(np.uint16))
 
-dataset_name = "dark_frames" #this will be either exp_frames or dark_frames
-
-frames_buffer = []
+    return image
 
 class Grabber(object):
 
@@ -309,7 +310,29 @@ class Grabber(object):
         # self.frame_socket.set_hwm(2000)
         # self.frame_socket.bind('tcp://%s' % p['read_addr'])
 
-    def zmq_receive(self, pub_address=None):
+    def zmq_receive(self, pub_address=None, no_control=False):
+
+
+        exp_total = 0
+        dark_total = 0
+
+        if no_control:
+            exp_total = 450
+            dark_total = 50
+
+        n_processed = 0
+
+        buffer_max_size = min(100, dark_total)  #this limits how many frames are stored in memory before writing to disk
+
+        dataset_name = "dark_frames" #this will be either exp_frames or dark_frames
+        current_total = dark_total
+
+        frames_buffer = []
+
+        index_list = []
+
+        self.print_status("Connecting zmq reading Thread", 'blue')
+        print("Connecting zmq reading Thread")
         addr = 'tcp://%s' % self.pars['framegrabber']['pub_addr']
         timeout = int(self.pars['framegrabber']['timeout'])
         context = zmq.Context()
@@ -317,20 +340,26 @@ class Grabber(object):
         frame_socket.setsockopt(zmq.SUBSCRIBE, b'')
         frame_socket.set_hwm(2000)
         frame_socket.connect(addr)
-        self.print_status("Starting zmq reading Thread", 'blue')
+        self.print_status("Running zmq reading Thread", 'blue')
+        print("Running zmq reading Thread")
         if timeout == 0:
             while not self.scan_stopped:
                 number, frame = frame_socket.recv_multipart()  # blocking
+                print("1: Received frame " + str(number))
                 # Could have been stopped in the meantime, so we need to
                 # discard this one
                 if not self.scan_stopped:
-                    self.scan.fbuffer.append((int(number), frame))
+                    #self.scan.fbuffer.append((int(number), frame))
 
-                    frames_buffer.append(frame)
+                    frames_buffer.append(frame_to_image(frame))
                     index_list.append(int(number))
 
-                    if dataset_name == "dark_frames": dark_processed +=1
-                    else if dataset_name == "exp_frames": exp_processed +=1
+                    if no_control and n_processed == dark_total:
+                        print("Reading exposure frames now")
+                        dataset_name = "exp_frames" #this will be either exp_frames or dark_frames
+                        current_total = exp_total
+
+                    n_processed +=1
 
                     if len(frames_buffer) == buffer_max_size:
                         write_data(self.fname, dataset_name, np.array(frames_buffer), np.array(index_list), current_total)
@@ -345,22 +374,31 @@ class Grabber(object):
             while not self.scan_stopped:
                 try:
                     number, frame = frame_socket.recv_multipart(flags=zmq.NOBLOCK)  # blocking
+                    print("2: Received frame " + str(number))
                 except zmq.ZMQError:
                     time.sleep(slp)
                     continue
-                self.scan.fbuffer.append((int(number), frame))
+                #self.scan.fbuffer.append((int(number), frame))
 
-                frames_buffer.append(frame)
+                frames_buffer.append(frame_to_image(frame))
                 index_list.append(int(number))
 
-                if dataset_name == "dark_frames": dark_processed +=1
-                else if dataset_name == "exp_frames": exp_processed +=1
+                if no_control and n_processed == dark_total:
+                    print("Reading exposure frames now")
+                    dataset_name = "exp_frames" #this will be either exp_frames or dark_frames
+                    current_total = exp_total
+
+                n_processed +=1
 
                 if len(frames_buffer) == buffer_max_size:
+
                     write_data(self.fname, dataset_name, np.array(frames_buffer), np.array(index_list), current_total)
                     frames_buffer = []
                     index_list = []
+                    
 
+        #We need to save the rest of the frames on the buffer at the end
+        write_data(self.fname, dataset_name, np.array(frames_buffer), np.array(index_list), current_total)
         self.print_status("Stopped reading frames", 'blue')
         frame_socket.disconnect(addr)
 
@@ -600,20 +638,40 @@ class Grabber(object):
 def main(stdscr):
     win = stdscr
     G = Grabber()
-    G.prepare()
-    # G.IA.activate()
-    # G.FG.start()
-    while True:
-        # process pending events
-        G.QA.processEvents()
-        time.sleep(0.1)
-        if win is not None:
-            win.clear()
-            for line in G.get_scan_status():
-                win.addstr(line)
-            win.refresh()
-        # handle client requests
-        # G.IA.process_requests()
+
+    no_control = True
+
+    if no_control:
+
+        G.fname = "test.h5"
+
+        #This deletes and rewrites a previous file with the same name
+        try:
+            os.remove(G.fname)
+        except OSError:
+            pass
+
+        G.scan_stopped = False
+        G._thread = Thread(target=G.zmq_receive(no_control=True))
+        G._thread.daemon = False
+        G._thread.start()
+
+    else:
+
+        G.prepare()
+        # G.IA.activate()
+        # G.FG.start()
+        while True:
+            # process pending events
+            G.QA.processEvents()
+            time.sleep(0.1)
+            if win is not None:
+                win.clear()
+                for line in G.get_scan_status():
+                    win.addstr(line)
+                win.refresh()
+            # handle client requests
+            # G.IA.process_requests()
 
 
 # parser = DEFAULT.add2argparser()
