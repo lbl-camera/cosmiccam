@@ -15,7 +15,7 @@ import tifffile
 from cosmic.camera.fccd import FCCD
 from cosmic.utils import ScanInfo
 import json
-from io_control import write_data
+from io_control import write_data, write_metadata
 
 import gc
 import zmq
@@ -249,19 +249,7 @@ DEFAULT.children['iaserver'].load_conf_parser(StringIO(
     """
 ))
 
-shape=(980, 960)
-num_rows = shape[0] // 2
-num_adcs = shape[1] // 6
 
-ccd = FCCD(nrows=num_rows)
-
-def frame_to_image(frame):
-
-    npbuf = np.frombuffer(frame, '<u2')
-    npbuf = npbuf.reshape((12 * num_rows, num_adcs))
-    image = ccd.assemble2(npbuf.astype(np.uint16))
-
-    return image
 
 class Grabber(object):
 
@@ -277,6 +265,7 @@ class Grabber(object):
         self.scan = Scan(self.shape)
         self.save_dir = '' 
         self.fname = ''
+        self.fname_h5 = ''
         self.dnum_max = None
         self.enum_max = None
         self.dnum = 0
@@ -291,6 +280,20 @@ class Grabber(object):
         self.SI = ScanInfo()
         self.cin = CIN()
 
+        self.frames_buffer = []
+        self.index_list = []
+
+        self.buffer_ready = False
+
+        self.mode = "disk" #disk, inmem, socket
+        self.current_dataset = ""
+
+        self.metadata = ""
+
+        self.current_total = 0 
+        self.dark_total = 0
+        self.exp_total = 0
+
         try:
             self.statusterm = open(pars['statusterm'], 'a')
         except IOError as e:
@@ -298,6 +301,20 @@ class Grabber(object):
             self.statusterm = None
 
         fsize = self.shape[0] * self.shape[1] * 2
+
+        shape= self.shape
+        self.num_rows = shape[0] // 2
+        self.num_adcs = shape[1] // 6
+
+        self.ccd = FCCD(nrows=self.num_rows)
+
+    def frame_to_image(self, frame):
+
+        npbuf = np.frombuffer(frame, '<u2')
+        npbuf = npbuf.reshape((12 * self.num_rows, self.num_adcs))
+        image = self.ccd.assemble2(npbuf.astype(np.uint16))
+
+        return image
 
     def prepare(self):
         ip, port = splitport(self.pars['tcp_addr'])
@@ -312,24 +329,15 @@ class Grabber(object):
 
     def zmq_receive(self, pub_address=None, no_control=False):
 
-
-        exp_total = 0
-        dark_total = 0
-
-        if no_control:
-            exp_total = 450
-            dark_total = 50
-
         n_processed = 0
 
-        buffer_max_size = min(100, dark_total)  #this limits how many frames are stored in memory before writing to disk
+        buffer_max_size = min(100, self.dark_total)  #this limits how many frames are stored in memory before consuming them
 
-        dataset_name = "dark_frames" #this will be either exp_frames or dark_frames
-        current_total = dark_total
+        self.current_dataset = "dark_frames" #this will be either exp_frames or dark_frames
+        self.current_total = self.dark_total
 
-        frames_buffer = []
-
-        index_list = []
+        self.frames_buffer = []
+        self.index_list = []
 
         self.print_status("Connecting zmq reading Thread", 'blue')
         print("Connecting zmq reading Thread")
@@ -351,20 +359,27 @@ class Grabber(object):
                 if not self.scan_stopped:
                     #self.scan.fbuffer.append((int(number), frame))
 
-                    frames_buffer.append(frame_to_image(frame))
-                    index_list.append(int(number))
+                    self.frames_buffer.append(self.frame_to_image(frame))
+                    self.index_list.append(int(number) - 1) #indexes are 1-based
 
-                    if no_control and n_processed == dark_total:
+                    if no_control and n_processed == self.dark_total:
                         print("Reading exposure frames now")
-                        dataset_name = "exp_frames" #this will be either exp_frames or dark_frames
-                        current_total = exp_total
+                        self.current_dataset = "exp_frames" #this will be either exp_frames or dark_frames
+                        self.current_total = self.exp_total
 
                     n_processed +=1
 
-                    if len(frames_buffer) == buffer_max_size:
-                        write_data(self.fname, dataset_name, np.array(frames_buffer), np.array(index_list), current_total)
-                        frames_buffer = []
-                        index_list = []
+                    if len(self.frames_buffer) == buffer_max_size:
+
+                        if self.mode == "disk": 
+                            write_data(self.fname, self.current_dataset, np.array(self.frames_buffer), np.array(self.index_list), self.current_total)
+                        elif self.mode == "inmem":
+                            self.buffer_ready = True
+                            while self.buffer_ready:
+                                pass #we wait here for someone to consume this data and turn off buffer_ready
+
+                        self.frames_buffer = []
+                        self.index_list = []
 
         else:
             # This could probablu have been done cleaner with a Poller
@@ -375,30 +390,41 @@ class Grabber(object):
                 try:
                     number, frame = frame_socket.recv_multipart(flags=zmq.NOBLOCK)  # blocking
                     print("2: Received frame " + str(number))
+                    print(self.shape)
                 except zmq.ZMQError:
                     time.sleep(slp)
                     continue
                 #self.scan.fbuffer.append((int(number), frame))
 
-                frames_buffer.append(frame_to_image(frame))
-                index_list.append(int(number))
+                self.frames_buffer.append(self.frame_to_image(frame))
+                self.index_list.append(int(number) - 1) #indexes are 1-based
 
-                if no_control and n_processed == dark_total:
+                if no_control and n_processed == self.dark_total:
                     print("Reading exposure frames now")
-                    dataset_name = "exp_frames" #this will be either exp_frames or dark_frames
-                    current_total = exp_total
+                    self.current_dataset = "exp_frames" #this will be either exp_frames or dark_frames
+                    self.current_total = self.exp_total
 
                 n_processed +=1
 
-                if len(frames_buffer) == buffer_max_size:
+                if len(self.frames_buffer) == buffer_max_size:
 
-                    write_data(self.fname, dataset_name, np.array(frames_buffer), np.array(index_list), current_total)
-                    frames_buffer = []
-                    index_list = []
+                    if self.mode == "disk": 
+                        write_data(self.fname, self.current_dataset, np.array(self.frames_buffer), np.array(self.index_list), self.current_total)
+                    elif self.mode == "inmem":
+                        self.buffer_ready = True
+                        while self.buffer_ready:
+                            pass #we wait here for someone to consume this data and turn off buffer_ready
+                    self.frames_buffer = []
+                    self.index_list = []
                     
 
         #We need to save the rest of the frames on the buffer at the end
-        write_data(self.fname, dataset_name, np.array(frames_buffer), np.array(index_list), current_total)
+        if self.mode == "disk": 
+            write_data(self.fname, self.current_dataset, np.array(self.frames_buffer), np.array(self.index_list), self.current_total)
+        elif self.mode == "inmem":
+            self.buffer_ready = True
+            while self.buffer_ready:
+                pass #we wait here for someone to consume this data and turn off buffer_ready
         self.print_status("Stopped reading frames", 'blue')
         frame_socket.disconnect(addr)
 
@@ -518,20 +544,22 @@ class Grabber(object):
         # this could maybe be part of read_tcp
         fac = info.get('repetition', 1)
         fac *= info.get('isDoubleExp', 0) + 1
-        dark_total = info.get('dark_num_total', 0) * fac
-        exp_total = info.get('exp_num_total', 0) * fac
+        self.dark_total = info.get('dark_num_total', 0) * fac
+        self.exp_total = info.get('exp_num_total', 0) * fac
 
         ia_addr = self.pars['iaserver']['ia_addr']
         if ia_addr is not None:
-            scan = ClientScan('tcp://%s' % ia_addr, shape=self.shape, num_dark=dark_total, num_exp=exp_total)
+            scan = ClientScan('tcp://%s' % ia_addr, shape=self.shape, num_dark=self.dark_total, num_exp=self.exp_total)
             self.print_status("Flushing data to ZMQ Interaction Server %s" % ia_addr)
         else:
             self.print_status("Using disk to store frames")
-            scan = Scan(shape=self.shape, num_dark=dark_total, num_exp=exp_total)
+            scan = Scan(shape=self.shape, num_dark=self.dark_total, num_exp=self.exp_total)
 
         # scan.info_raw = info_raw  # uncomment to avoid display
         scan.info = info
         self.scan = scan
+
+        self.metadata = info
 
         gc.collect()
 
@@ -544,6 +572,11 @@ class Grabber(object):
     def on_new_path(self, nnpath):
 
         npath = str(nnpath)
+
+        if self.fname_h5 == '':
+
+            self.fname_h5 = os.path.split(npath)[0] + "/" + "raw_data.h5"
+
         scan = self.scan
 
         trunk, scan.stack_idx = os.path.split(npath)
@@ -561,7 +594,7 @@ class Grabber(object):
             self.scan_is_dark = False
 
             dataset_name = "dark_frames"
-            current_total = dark_total
+            self.current_total = self.dark_total
 
         else:
             scan.dark.is_full = True
@@ -569,10 +602,12 @@ class Grabber(object):
             scan.fbuffer = scan.exp.frames
 
             dataset_name = "exp_frames"
-            current_total = exp_total
+            self.current_total = self.exp_total
 
             # this event signals the scan to be ready for being processed
             scan.save_meta()
+
+            write_metadata(self.fname_h5, json.dump(self.metadata))
 
             self.scan_is_dark = True
 
@@ -639,11 +674,14 @@ def main(stdscr):
     win = stdscr
     G = Grabber()
 
-    no_control = True
+    no_control = False
 
     if no_control:
 
-        G.fname = "test.h5"
+        G.exp_total = 450
+        G.dark_total = 50
+
+        G.fname_h5 = "raw_data.h5"
 
         #This deletes and rewrites a previous file with the same name
         try:
@@ -665,11 +703,15 @@ def main(stdscr):
             # process pending events
             G.QA.processEvents()
             time.sleep(0.1)
-            if win is not None:
-                win.clear()
-                for line in G.get_scan_status():
-                    win.addstr(line)
-                win.refresh()
+            #for line in G.get_scan_status():
+            #    print(line)
+
+            #if win is not None:
+            #    win.clear()
+            #    for line in G.get_scan_status():
+            #        win.addstr(line)
+            #    win.refresh()
+
             # handle client requests
             # G.IA.process_requests()
 
