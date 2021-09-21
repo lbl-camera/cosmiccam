@@ -87,6 +87,18 @@ def nanoball_object(shape, rad=5, num=40):
 
     return out
 
+def to_image(name, b):
+
+    shape = (1040,1152)
+    num_rows = shape[0] // 2
+    num_adcs = shape[1] // 6
+    CCD = FCCD(nrows=num_rows)
+	
+    npbuf = np.frombuffer(b, '<u2')
+    npbuf = npbuf.reshape((12 * num_rows, num_adcs))
+    image = CCD.assemble2(npbuf.astype(np.uint16))
+    tifffile.imsave(name, image)
+
 class FccdSimulator:
     """Simulates STXM control and FCCD camera."""
     def __init__(self, params=None):
