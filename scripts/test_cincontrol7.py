@@ -227,8 +227,8 @@ DEFAULT.children['framegrabber'].load_conf_parser(StringIO(
     help = ip:port type address of the udp frame server
     
     [pub_addr]
-    default = "127.0.0.1:49206"
-    help = ip:port the framegrabber publishe frames. [NOT IMPLEMENTED]
+    default = "127.0.0.1:49209"
+    help = ip:port the framegrabber publishe frames.
     
     [read_addr]
     default = "10.0.0.16:49207"
@@ -314,7 +314,7 @@ class Grabber(object):
         self.dark_frames_offset = 0 #we use this to 0-index the exposure frames after mesure the dark ones
 
         self.send_socket = None
-        self.send_addr = splitaddr("127.0.0.1:50000")
+        self.send_addr = splitaddr("127.0.0.1:50006")
 
         try:
             self.statusterm = open(pars['statusterm'], 'a')
@@ -728,7 +728,7 @@ if __name__=='__main__':
                     "exp_step_y": 0.03,
                     "isDoubleExp": 1,
                     "double_exposure": True,
-                    "exp_num_total": G.exp_total//2,
+                    "exp_num_total": G.exp_total,
                     "dark_num_total": G.dark_total,
                     "exp_num_x": 15,
                     "exp_num_y": 15,
