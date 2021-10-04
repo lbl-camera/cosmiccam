@@ -16,6 +16,9 @@ from cosmic.utils import ScanInfo
 import json
 from io_control import write_data, write_metadata
 
+import msgpack
+import msgpack_numpy
+
 import gc
 import zmq
 
@@ -227,8 +230,8 @@ DEFAULT.children['framegrabber'].load_conf_parser(StringIO(
     help = ip:port type address of the udp frame server
     
     [pub_addr]
-    default = "127.0.0.1:49209"
-    help = ip:port the framegrabber publishe frames.
+    default = "127.0.0.1:49206"
+    help = ip:port the framegrabber publishes frames.
     
     [read_addr]
     default = "10.0.0.16:49207"
@@ -267,6 +270,8 @@ def wait_for_n_subscribers(pub_socket: zmq.Socket, n_subscribers: int):
         print("Waiting for a subscriber")
         recv_monitor_message(events_socket)  # this will block until a handshake was successful
         connections += 1
+
+from PIL import Image
 
 class Grabber(object):
 
@@ -314,7 +319,7 @@ class Grabber(object):
         self.dark_frames_offset = 0 #we use this to 0-index the exposure frames after mesure the dark ones
 
         self.send_socket = None
-        self.send_addr = splitaddr("127.0.0.1:50006")
+        self.send_addr = splitaddr("127.0.0.1:50007")
 
         try:
             self.statusterm = open(pars['statusterm'], 'a')
@@ -362,7 +367,7 @@ class Grabber(object):
         self.send_socket.bind('tcp://%s:%d' % self.send_addr)
         self.send_socket.set_hwm(10000)
         print("Output frames will be sent to ip %s port %d" % self.send_addr)
-
+    
     def send_frames(self):
 
         if self.mode == "disk": 
@@ -375,7 +380,12 @@ class Grabber(object):
             for i in range(len(self.frames_buffer)):
                 print("Sending frame " + str(self.index_list[i]) + " to socket")
 
-                self.send_socket.send_multipart([b'%d' % self.index_list[i], self.frames_buffer[i]])
+                msg = msgpack.packb((b'%d' % self.index_list[i], self.frames_buffer[i]), default=msgpack_numpy.encode, use_bin_type=True)
+
+                self.send_socket.send(msg)
+                
+                #im1 = Image.fromarray(np.array(self.frames_buffer[i]))
+                #im1.convert("L").save("sent_" + str(i) + ".png")
 
         self.frames_buffer = []
         self.index_list = []
@@ -417,7 +427,7 @@ class Grabber(object):
 
         while not self.scan_stopped:
             try:
-                number, frame = frame_socket.recv_multipart(flags=zmq.NOBLOCK)  # blocking
+                number, frame = frame_socket.recv_multipart(flags=zmq.NOBLOCK) 
                 print("2: Received frame " + str(number))
                 print(self.shape)
             except zmq.ZMQError:
@@ -709,7 +719,7 @@ if __name__=='__main__':
     if no_control:
 
         pars = {"shape":(1040,1152)}
-        G = Grabber(mode = "socket")
+        G = Grabber(mode = "disk")
 
         G.exp_total = 450
         G.dark_total = 50

@@ -19,7 +19,7 @@ PARAMS = dict(
     ),
     comm=dict(
         udp_ip='127.0.0.1',
-        udp_port=49203,
+        udp_port=49209,
     )
 )
 

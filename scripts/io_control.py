@@ -6,6 +6,8 @@ import numpy as np
 #dataset_name is intended to be exp_frames or dark_frames
 def write_data(file_name, dataset_name, data, index_list, total_indexes):
 
+    print(type(data[0,0,0]))
+
     print("Writing data into " + str(file_name))
 
     fname = file_name
@@ -19,7 +21,7 @@ def write_data(file_name, dataset_name, data, index_list, total_indexes):
         
        if not dataset in fid: 
            print("Creating data group " + str(dataset))
-           fid.create_dataset(dataset, (total_indexes,) + data[0].shape, dtype='float32') #we create the full dataset size
+           fid.create_dataset(dataset, (total_indexes,) + data[0].shape, dtype='uint16') #we create the full dataset size
 
        #Here we generate a proper index pull map, with respect to the input
        print(dataset_name)
