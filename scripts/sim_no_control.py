@@ -12,7 +12,7 @@ PARAMS = dict(
     # parameters for the frontend
     nstream=dict(
         step=0.03,  # mum
-        num=15,  # number of
+        num=25,  # number of
         bnum=5,  # num of dark points for each axes
         dwell=(100, 500), #(100, 100),  # msec
         energy=800,  # ev
@@ -110,7 +110,7 @@ class FccdSimulator:
         self.udp_header_size = 8
         #self.shape = (1920, 960)  # (1940,1152)
         #self.fCCD = fccd.FCCD()
-        self.shape = (980, 960)  # (1940,1152)
+        self.shape = (992, 960) #(980, 960)  # (1940,1152)
         self.fCCD = fccd.FCCD(nrows=self.shape[0]//2)
         self.psize = 30
         self.offset = 10000
@@ -244,6 +244,7 @@ class FccdSimulator:
         # scramble
         res = c._rawXclock(c._clockXrow(c._rowXccd(frame)))
         # convert to byte stream, assure uint16. Cut off a bit at the end and attach ending message
+        res = np.vstack([np.zeros((1,res.shape[1]),dtype=res.dtype), res]) #bjorn last suggestion
         res = res.astype(np.uint16).byteswap().tobytes()[:-200] + self.end_of_frame_msg
         return res
 

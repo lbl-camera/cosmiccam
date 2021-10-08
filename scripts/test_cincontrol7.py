@@ -719,9 +719,11 @@ if __name__=='__main__':
     if no_control:
 
         pars = {"shape":(1040,1152)}
-        G = Grabber(mode = "disk")
+        G = Grabber(mode = "socket")
 
-        G.exp_total = 450
+        n_points = 25
+
+        G.exp_total = n_points * n_points * 2
         G.dark_total = 50
 
         G.fname_h5 = "raw_data.h5"
@@ -740,8 +742,8 @@ if __name__=='__main__':
                     "double_exposure": True,
                     "exp_num_total": G.exp_total,
                     "dark_num_total": G.dark_total,
-                    "exp_num_x": 15,
-                    "exp_num_y": 15,
+                    "exp_num_x": n_points,
+                    "exp_num_y": n_points,
                     "dwell1": 100, 
                     "dwell2": 500
                     }
