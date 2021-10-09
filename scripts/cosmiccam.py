@@ -6,7 +6,7 @@ from PyQt5 import QtCore, QtNetwork
 from cosmic.camera.cin import CIN
 from cosmic.ext.ptypy.io import interaction
 import numpy as np
-import os
+import os, sys
 from threading import Thread
 from urllib.parse import splitport
 from collections import deque, OrderedDict
@@ -15,12 +15,15 @@ from cosmic.camera.fccd import FCCD
 from cosmic.utils import ScanInfo
 import json
 from io_control import write_data, write_metadata
+from options import parse_arguments
 
 import msgpack
 import msgpack_numpy
 
 import gc
 import zmq
+
+from io import StringIO
 
 term = {
     'default': lambda x: x,
@@ -198,58 +201,8 @@ class ClientScan(Scan):
         self.client.wait()
         self.client.stop()
 
-from io import StringIO
 
-DEFAULT = ArgParseParameter(name='Grabber')
-DEFAULT.load_conf_parser(StringIO(
-    """[shape]
-    default = (1040,1152)
-    help = (H,W) of the detector in pixel including overscan pixels
-    
-    [tcp_addr]
-    default = "131.243.73.179:8880"
-    help = IP:Port address of command tcp server.
-    
-    [statusterm]
-    default = "/dev/pts/1"
-    help = Second terminal pointer to display status updates.
-    
-    [iaserver]
-    default = None
-    help = Interaction server parameters
-    
-    [framegrabber]
-    default = None
-    help = Framegrabber init parameters
-    """))
 
-# DEFAULT_framegrabber = ArgParseParameter(name='framegrabber')
-DEFAULT.children['framegrabber'].load_conf_parser(StringIO(
-    """[udp_addr]
-    default = "10.0.5.207:49203"
-    help = ip:port type address of the udp frame server
-    
-    [pub_addr]
-    default = "127.0.0.1:49206"
-    help = ip:port the framegrabber publishes frames.
-    
-    [read_addr]
-    default = "10.0.0.16:49207"
-    help = ip:port type address the grabber contacts the udp server from.
-    
-    [timeout]
-    default = 50
-    help = Blocking timeout on receive in ms. If set to zero, the framegrabber
-      will receive and discard an additional frame. Otherwise chose a timeout
-      that is smaller than the waiting time in between scans to avoid overlap.
-    """))
-
-DEFAULT.children['iaserver'].load_conf_parser(StringIO(
-    """[ia_addr] 
-    default = None
-    help = Default address for primary connection of shape "host:port"
-    """
-))
 
 def splitaddr(addr):
     host, port = splitport(addr)
@@ -275,15 +228,14 @@ from PIL import Image
 
 class Grabber(object):
 
-    ## Parameters
+    def __init__(self, input_address = None, output_address = None, control_address = None, mode = "disk"):
 
-    def __init__(self, pars=None, mode = "disk"):
+        self.input_address  = input_address
+        self.output_address  = output_address
+        self.control_address  = control_address
 
-        default = DEFAULT.make_default(depth=10)
-        pars = default if pars is None else pars
-        self.pars = pars
         # self.scans = deque(maxlen=2)
-        self.shape = pars['shape']
+        self.shape = (1040,1152) #(H,W) of the detector in pixel including overscan pixels
         self.scan = Scan(self.shape)
         self.save_dir = '' 
         self.fname = ''
@@ -307,7 +259,7 @@ class Grabber(object):
 
         self.buffer_ready = False
 
-        self.mode = mode #disk, inmem, socket
+        self.mode = mode #'disk','socket','disksocket' or 'inmem'
         self.current_dataset = "dark_frames" #this will be either exp_frames or dark_frames
 
         self.metadata = ""
@@ -319,10 +271,10 @@ class Grabber(object):
         self.dark_frames_offset = 0 #we use this to 0-index the exposure frames after mesure the dark ones
 
         self.send_socket = None
-        self.send_addr = splitaddr("127.0.0.1:50007")
+
 
         try:
-            self.statusterm = open(pars['statusterm'], 'a')
+            self.statusterm = open("/dev/pts/1", 'a')
         except IOError as e:
             print(e)
             self.statusterm = None
@@ -337,7 +289,7 @@ class Grabber(object):
 
         self.ccd = FCCD(nrows=self.num_rows)
 
-        if self.mode == "socket":
+        if self.mode == "socket" or self.mode == "disksocket":
             self.createSendFrameSocket()
             wait_for_n_subscribers(self.send_socket, 1)
 
@@ -350,33 +302,27 @@ class Grabber(object):
         return image
 
     def prepare(self):
-        ip, port = splitport(self.pars['tcp_addr'])
+        ip, port = splitport(self.control_address)
         self.createReceiveCommandsSocket_qtcpserver(ip=ip, port=int(port))
 
-        # context = zmq.Context()
-        p = self.pars['framegrabber']
-        # self.frame_socket = context.socket(zmq.SUB)
-        # self.frame_socket.setsockopt(zmq.SUBSCRIBE, '')
-        # self.frame_socket.set_hwm(2000)
-        # self.frame_socket.bind('tcp://%s' % p['read_addr'])
 
     def createSendFrameSocket(self):
 
         context = zmq.Context()
         self.send_socket = context.socket(zmq.PUB)
-        self.send_socket.bind('tcp://%s:%d' % self.send_addr)
+        self.send_socket.bind('tcp://%s' % self.output_address)
         self.send_socket.set_hwm(10000)
-        print("Output frames will be sent to ip %s port %d" % self.send_addr)
+        print("Output frames will be sent to {}".format(self.output_address))
     
     def send_frames(self):
 
-        if self.mode == "disk": 
+        if self.mode == "disk" or self.mode == "disksocket": 
             write_data(self.fname_h5, self.current_dataset, np.array(self.frames_buffer), np.array(self.index_list), self.current_total)
-        elif self.mode == "inmem":
+        if self.mode == "inmem":
             self.buffer_ready = True
             while self.buffer_ready:
                 pass #we wait here for someone to consume this data and turn off buffer_ready
-        elif self.mode == "socket":
+        if self.mode == "socket" or self.mode == "disksocket":
             for i in range(len(self.frames_buffer)):
                 print("Sending frame " + str(self.index_list[i]) + " to socket")
 
@@ -406,9 +352,9 @@ class Grabber(object):
         self.index_list = []
 
         self.print_status("Connecting zmq reading Thread", 'blue')
-        print("Connecting zmq reading Thread")
-        addr = 'tcp://%s' % self.pars['framegrabber']['pub_addr']
-        timeout = int(self.pars['framegrabber']['timeout'])
+        print("Thread reading data from {}".format(self.input_address))
+        addr = 'tcp://%s' % self.input_address
+        timeout = 50
         context = zmq.Context()
         frame_socket = context.socket(zmq.SUB)
         frame_socket.setsockopt(zmq.SUBSCRIBE, b'')
@@ -443,9 +389,6 @@ class Grabber(object):
             if first_frame:
                 first_id = int(number)
                 first_frame = False
-                if self.mode == "socket":
-                #We have to send first the raw frames shapes in order to deserialize later
-                    self.send_metadata({"raw_frame_shape" : self.frame_to_image(frame).shape})
             
             self.frames_buffer.append(self.frame_to_image(frame))
             self.index_list.append(int(number) - self.dark_frames_offset - first_id)
@@ -586,13 +529,7 @@ class Grabber(object):
         self.dark_total = info.get('dark_num_total', 0) * fac
         self.exp_total = info.get('exp_num_total', 0) * fac
 
-        ia_addr = self.pars['iaserver']['ia_addr']
-        if ia_addr is not None:
-            scan = ClientScan('tcp://%s' % ia_addr, shape=self.shape, num_dark=self.dark_total, num_exp=self.exp_total)
-            self.print_status("Flushing data to ZMQ Interaction Server %s" % ia_addr)
-        else:
-            self.print_status("Using disk to store frames")
-            scan = Scan(shape=self.shape, num_dark=self.dark_total, num_exp=self.exp_total)
+        scan = Scan(shape=self.shape, num_dark=self.dark_total, num_exp=self.exp_total)
 
         # scan.info_raw = info_raw  # uncomment to avoid display
         scan.info = info
@@ -649,7 +586,7 @@ class Grabber(object):
             # this event signals the scan to be ready for being processed
             scan.save_meta()
 
-            if self.mode == "socket":
+            if self.mode == "socket" or self.mode == "disksocket":
                 self.send_metadata(self.metadata)
             else:
                 write_metadata(self.fname_h5, json.dumps(self.metadata))
@@ -716,12 +653,18 @@ if __name__=='__main__':
 
     no_control = True
 
-    if no_control:
+    args = sys.argv[1:]
+    options = parse_arguments(args)
+
+    print(options)
+
+    if options["no_control"]:
 
         pars = {"shape":(1040,1152)}
-        G = Grabber(mode = "socket")
+        G = Grabber(input_address = options["input_address"], output_address = options["output_address"], 
+                    control_address = options["control_address"], mode = options["output_mode"])
 
-        n_points = 25
+        n_points = 15
 
         G.exp_total = n_points * n_points * 2
         G.dark_total = 50
@@ -750,7 +693,7 @@ if __name__=='__main__':
 
         metadata['translations'] = [(y * metadata["exp_step_y"], x * metadata["exp_step_x"]) for y in range(metadata["exp_num_y"]) for x in range(metadata["exp_num_x"])]        
 
-        if G.mode == "socket":
+        if G.mode == "socket" or G.mode == "disksocket":
             G.send_metadata(metadata)
         else:
             write_metadata(G.fname_h5, json.dumps(metadata))
@@ -761,27 +704,13 @@ if __name__=='__main__':
         G._thread.start()
 
     else:
-        G = Grabber()
+        G = Grabber(input_address = options["input_address"], output_address = options["output_address"], 
+                    control_address = options["control_address"], mode = options["output_mode"])
         G.prepare()
-        # G.IA.activate()
-        # G.FG.start()
+
         while True:
             # process pending events
             G.QA.processEvents()
             time.sleep(0.1)
-            #for line in G.get_scan_status():
-            #    print(line)
 
-            #if win is not None:
-            #    win.clear()
-            #    for line in G.get_scan_status():
-            #        win.addstr(line)
-            #    win.refresh()
-
-            # handle client requests
-            # G.IA.process_requests()
-
-
-# parser = DEFAULT.add2argparser()
-DEFAULT.parse_args()
 

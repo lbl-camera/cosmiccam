@@ -18,7 +18,7 @@ setup(
     author='Bjoern Enders, David Shapiro and others',
     include_package_data=True,
     ext_modules=[udp_ext],
-    requires=['numpy (>=1.8.2)', 'setuptools', 'tifffile'],
+    requires=['numpy (>=1.8.2)', 'setuptools', 'tifffile', 'msgpack', 'msgpack_numpy'],
     license="ALS private use for now",
     zip_safe=False,
     #packages=['cosmic',

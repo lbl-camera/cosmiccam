@@ -12,7 +12,7 @@ PARAMS = dict(
     # parameters for the frontend
     nstream=dict(
         step=0.03,  # mum
-        num=25,  # number of
+        num=15,  # number of
         bnum=5,  # num of dark points for each axes
         dwell=(100, 500), #(100, 100),  # msec
         energy=800,  # ev
