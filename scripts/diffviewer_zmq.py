@@ -74,7 +74,6 @@ class Framegrabber_viewer(QtCore.QThread):
             pedestal = np.frombuffer(buf[row_bytes * 5: row_bytes * 55], '<u2')
                 
             self.frame = npbuf.reshape((npbuf.size // self.CCD._nbmux, self.CCD._nbmux)).astype(np.float)
-            print(self.frame.shape)
 
             #Here we generate a descrambled preview of the frames
             if mode == 0:
@@ -131,25 +130,37 @@ class Viewer(QtCore.QThread):
         network_metadata["input_address"] = self.address
         network_metadata["input_socket"] = subscribe_to_socket(network_metadata)
 
-        if mode == 2 or mode == 3:
-            metadata = receive_metadata(network_metadata)
+        #if mode == 2 or mode == 3:
+        #    metadata = receive_metadata(network_metadata)
 
         first_msg = True
 
         while True:
             msg = network_metadata["input_socket"].recv()
-            (number, frame) = msgpack.unpackb(msg, object_hook= msgpack_numpy.decode, use_list=False,  max_bin_len=50000000, raw=False)
+
+            #This bypasses the metadata
+            try:
+                a = msgpack.unpackb(msg, object_hook= msgpack_numpy.decode, use_list=False,  max_bin_len=50000000, raw=False)
+                if mode == 4 or mode == 5:
+                    (number, frame, probe) = a
+                else:
+                    (number, frame) = a
+            except:
+                continue
             #print(frame.shape)
             #print(type(frame))
+            output = frame
 
             if mode == 4:
                 #Here number is the frame width, and we crop using that
-                frame = np.abs(frame[number//2:-number//2,number//2:-number//2])
+                output = np.abs(frame[number//2:-number//2,number//2:-number//2])
+            if mode == 5:
+                output = np.abs(probe)
 
             if first_msg:
-                self.view.setRange(QtCore.QRectF(0, 0, *(frame.shape)))
+                self.view.setRange(QtCore.QRectF(0, 0, *(output.shape)))
                 first_msg = False
-            self.framedata.emit(frame.T)
+            self.framedata.emit(output.T)
         frame_socket.disconnect(addr)
 
 
@@ -158,12 +169,13 @@ def updateData(data):
     global img
     img.setImage(data)
 
-mode_title = list(range(0,5))
+mode_title = list(range(0,6))
 mode_title[0] = "Descrambled preview frames from framegrabber"
 mode_title[1] = "Scrambled frames"
 mode_title[2] = "Descrambled frames"
 mode_title[3] = "Filtered frames"
 mode_title[4] = "Reconstructed image"
+mode_title[5] = "Reconstructed probe"
 
 ## Start Qt event loop unless running in interactive mode.
 if __name__ == '__main__':

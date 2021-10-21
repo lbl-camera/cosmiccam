@@ -161,7 +161,7 @@ class Scan(object):
 
     def store_image(self, path, im):
         fname = path+'.tif'
-        tifffile.imsave(fname, im)
+        #tifffile.imsave(fname, im)
         return fname
 
     def save_data(self):
@@ -565,6 +565,12 @@ class Grabber(object):
     def on_start_capture(self, msg):
         scan = self.scan
         if self.scan_is_dark:
+
+            if self.mode == "socket" or self.mode == "disksocket":
+                self.send_metadata(self.metadata)
+            if self.mode == "disk" or self.mode == "disksocket":
+                write_metadata(self.fname_h5, json.dumps(self.metadata))
+
             scan.fbuffer = scan.dark.frames
             scan.dark.dir = self.save_dir
             self.scan_is_dark = False
@@ -582,14 +588,8 @@ class Grabber(object):
             self.current_total = self.exp_total
             self.current_dataset = "exp_frames" 
 
-
-            # this event signals the scan to be ready for being processed
+        	# this event signals the scan to be ready for being processed
             scan.save_meta()
-
-            if self.mode == "socket" or self.mode == "disksocket":
-                self.send_metadata(self.metadata)
-            else:
-                write_metadata(self.fname_h5, json.dumps(self.metadata))
 
             self.scan_is_dark = True
 
@@ -666,8 +666,8 @@ if __name__=='__main__':
 
         n_points = 15
 
-        G.exp_total = n_points * n_points * 2
-        G.dark_total = 50
+        G.exp_total = n_points * n_points
+        G.dark_total = 25
 
         G.fname_h5 = "raw_data.h5"
 
