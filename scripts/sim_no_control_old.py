@@ -14,7 +14,7 @@ PARAMS = dict(
         step=0.03,  # mum
         num=15,  # number of
         bnum=5,  # num of dark points for each axes
-        dwell=(100, 500), #(100, 100),  # msec
+        dwell=(200, 10), #(100, 100),  # msec
         energy=800,  # ev
     ),
     comm=dict(
@@ -224,9 +224,9 @@ class FccdSimulator:
         print("Frame waves to larger detector shape ..")
         self.exp_frames = [self._draw(self._embed_frame(frame)) for frame in diffstack]
 
-        '''for i in range(0, len(self.exp_frames)):
+        for i in range(0, len(self.exp_frames)):
             im1 = Image.fromarray(np.array(self.exp_frames[i]).astype(np.float32))
-            im1.convert("L").save("orig_diff_" + str(i) + ".png")'''
+            im1.convert("L").save("orig_diff_" + str(i) + ".png")
 
 
     def _embed_frame(self, frame):
@@ -238,7 +238,7 @@ class FccdSimulator:
 
     def _draw(self, frames):
         # add background noise
-        res = frames + np.random.normal(loc=self.offset, scale=self.io_noise, size=frames.shape).astype(int)
+        res = frames #+ np.random.normal(loc=self.offset, scale=self.io_noise, size=frames.shape).astype(int)
         # cut at saturation
         res[res > 63000] = 63000
         return res

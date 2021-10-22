@@ -254,6 +254,8 @@ class Grabber(object):
         self.SI = ScanInfo()
         self.cin = CIN()
 
+        self.isDoubleExp = 0
+
         self.frames_buffer = []
         self.index_list = []
 
@@ -380,11 +382,11 @@ class Grabber(object):
                 time.sleep(slp)
                 continue
 
-            if no_control and n_processed == self.dark_total:
+            if no_control and n_processed == self.dark_total * (self.isDoubleExp + 1):
                 print("Reading exposure frames now")
-                self.dark_frames_offset = self.dark_total
+                self.dark_frames_offset = self.dark_total * (self.isDoubleExp + 1)
                 self.current_dataset = "exp_frames" #this will be either exp_frames or dark_frames
-                self.current_total = self.exp_total
+                self.current_total = self.exp_total * (self.isDoubleExp + 1)
 
             if first_frame:
                 first_id = int(number)
@@ -399,7 +401,7 @@ class Grabber(object):
                 self.send_frames()
 
             #In principle this is only used with a simulation
-            if n_processed == (self.dark_total + self.exp_total):
+            if n_processed == (self.dark_total + self.exp_total) * (self.isDoubleExp + 1):
                 print("All expected frames collected, stopping the scan now.")
                 self.scan_stopped = True       
 
@@ -666,6 +668,8 @@ if __name__=='__main__':
 
         n_points = 15
 
+        G.isDoubleExp =  1
+
         G.exp_total = n_points * n_points
         G.dark_total = 25
 
@@ -681,7 +685,7 @@ if __name__=='__main__':
                     "energy": 800,
                     "exp_step_x": 0.03, 
                     "exp_step_y": 0.03,
-                    "isDoubleExp": 1,
+                    "isDoubleExp": G.isDoubleExp,
                     "double_exposure": True,
                     "exp_num_total": G.exp_total,
                     "dark_num_total": G.dark_total,
@@ -695,7 +699,7 @@ if __name__=='__main__':
 
         if G.mode == "socket" or G.mode == "disksocket":
             G.send_metadata(metadata)
-        else:
+        if G.mode == "disk" or G.mode == "disksocket":
             write_metadata(G.fname_h5, json.dumps(metadata))
 
         G.scan_stopped = False
