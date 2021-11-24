@@ -144,9 +144,6 @@ class Viewer(QtCore.QThread):
         network_metadata["input_address"] = self.address
         network_metadata["input_socket"] = subscribe_to_socket(network_metadata)
 
-        #if mode == 2 or mode == 3:
-        #    metadata = receive_metadata(network_metadata)
-
         first_msg = True
 
         all_data = []
@@ -158,7 +155,7 @@ class Viewer(QtCore.QThread):
             #This bypasses the metadata
             try:
                 a = msgpack.unpackb(msg, object_hook= msgpack_numpy.decode, use_list=False,  max_bin_len=50000000, raw=False)
-                if mode == 4 or mode == 5:
+                if mode == 4 or mode == 5 or mode == 6:
                     (number, frame, probe) = a
                 else:
                     (number, frame) = a
@@ -172,9 +169,11 @@ class Viewer(QtCore.QThread):
                 #Here number is the frame width, and we crop using that
                 output = np.abs(frame[number//2:-number//2,number//2:-number//2])
             if mode == 5:
-                output = np.abs(probe)
-            if mode == 6:
                 output = np.angle(frame[number//2:-number//2,number//2:-number//2])
+            if mode == 6:
+                output = np.abs(probe)
+
+            output = np.rot90(output)
 
             if first_msg:
                 self.view.setRange(QtCore.QRectF(0, 0, *(output.shape)))
@@ -201,8 +200,8 @@ mode_title[1] = "Scrambled frames"
 mode_title[2] = "Descrambled frames"
 mode_title[3] = "Filtered frames"
 mode_title[4] = "Reconstructed image (abs)"
-mode_title[5] = "Reconstructed probe"
-mode_title[6] = "Reconstructed image (angle)"
+mode_title[5] = "Reconstructed image (angle)"
+mode_title[6] = "Reconstructed probe"
 
 ## Start Qt event loop unless running in interactive mode.
 if __name__ == '__main__':
@@ -218,7 +217,7 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         mode = int(sys.argv[1])
         address = sys.argv[2]
-        save = sys.argv[3]
+        save = int(sys.argv[3])
     else:
         address = "127.0.0.1:49206"
         save = 0
