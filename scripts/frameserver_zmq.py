@@ -250,7 +250,7 @@ if __name__=='__main__':
     #FG=Framegrabber(2*1152*1040,read_addr= "10.0.5.55:49205",send_addr ="127.0.0.1:49206",udp_addr ="localhost:49203")
     #FG=Framegrabber(2*1152*1040,read_addr="127.0.0.1:49205",send_addr="127.0.0.1:49206",udp_addr ="127.0.0.1:49203")
     ## Simulation with test_stxmcontrol:
-    FG=Framegrabber(2*1152*1040,read_addr="127.0.0.1:49205",send_addr="127.0.0.1:49206",udp_addr ="127.0.0.1:49209" )
+    FG=Framegrabber(2*1152*1040,read_addr="127.0.0.1:49205",send_addr="127.0.0.1:49207",udp_addr ="127.0.0.1:49209" )
     FG.createReadFrameSocket()
     FG.createSendFrameSocket()
     FG.daemon =True

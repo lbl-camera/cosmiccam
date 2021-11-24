@@ -13,6 +13,7 @@ import time
 import json
 import msgpack
 import msgpack_numpy
+from PIL import Image
 
 # magma colormap
 from pyqtgraph import ColorMap
@@ -41,7 +42,7 @@ from cosmic.camera.fccd import FCCD
 class Framegrabber_viewer(QtCore.QThread):
     framedata = QtCore.pyqtSignal(np.ndarray)
 
-    def __init__(self, rows=520, roi=480, cols=1152, address="127.0.0.1:49206", mode = None):
+    def __init__(self, rows=520, roi=480, cols=1152, address="127.0.0.1:49206", mode = None, save = 0):
         self.address = address
         QtCore.QThread.__init__(self)
         self.number = ''
@@ -50,6 +51,7 @@ class Framegrabber_viewer(QtCore.QThread):
         self.rows = rows
         self.roi = roi
         self.cols = cols
+        self.save = save
 
     def __del__(self):
         self.wait()
@@ -64,6 +66,9 @@ class Framegrabber_viewer(QtCore.QThread):
         row_bytes = self.cols * 4
 
         first_msg = True
+
+        all_data = []
+        index = 0
 
         while True:
             self.number, buf = frame_socket.recv_multipart()  # blocking
@@ -87,7 +92,15 @@ class Framegrabber_viewer(QtCore.QThread):
                 #self.view.setRange(QtCore.QRectF(0, 0, *(self.frame.shape)))
                 first_msg = False
 
-            self.framedata.emit(self.frame.T)
+            self.framedata.emit(self.frame)
+            if self.save != 0:
+                print("saving image")
+                a = np.log(self.frame + 0.1)
+                b = (a  / np.max(a) ) * 255
+                im1 = Image.fromarray(np.array(b).astype(np.float32))
+                #im1 = Image.fromarray(np.array(self.frame.T).astype(np.float32))
+                im1.convert("L").save("images/mode_{}_{}.tiff".format(mode, index))
+            index += 1
         frame_socket.disconnect(addr)
 
 
@@ -115,9 +128,10 @@ def subscribe_to_socket(network_metadata):
 class Viewer(QtCore.QThread):
     framedata = QtCore.pyqtSignal(np.ndarray)
 
-    def __init__(self, view, address="127.0.0.1:49206", mode = None):
+    def __init__(self, view, address="127.0.0.1:49206", mode = None, save = 0):
         self.address = address
         self.view = view
+        self.save = save
         QtCore.QThread.__init__(self)
 
     def __del__(self):
@@ -134,6 +148,9 @@ class Viewer(QtCore.QThread):
         #    metadata = receive_metadata(network_metadata)
 
         first_msg = True
+
+        all_data = []
+        index = 0
 
         while True:
             msg = network_metadata["input_socket"].recv()
@@ -156,11 +173,20 @@ class Viewer(QtCore.QThread):
                 output = np.abs(frame[number//2:-number//2,number//2:-number//2])
             if mode == 5:
                 output = np.abs(probe)
+            if mode == 6:
+                output = np.angle(frame[number//2:-number//2,number//2:-number//2])
 
             if first_msg:
                 self.view.setRange(QtCore.QRectF(0, 0, *(output.shape)))
                 first_msg = False
-            self.framedata.emit(output.T)
+            self.framedata.emit(output)
+            if self.save != 0:
+                print("saving image")
+                a = np.log(output + 0.1)
+                b = (a  / np.max(a) ) * 255
+                im1 = Image.fromarray(np.array(b).astype(np.float32))
+                im1.convert("L").save("images/mode_{}_{}.tiff".format(mode, index))
+            index += 1
         frame_socket.disconnect(addr)
 
 
@@ -169,13 +195,14 @@ def updateData(data):
     global img
     img.setImage(data)
 
-mode_title = list(range(0,6))
+mode_title = list(range(0,7))
 mode_title[0] = "Descrambled preview frames from framegrabber"
 mode_title[1] = "Scrambled frames"
 mode_title[2] = "Descrambled frames"
 mode_title[3] = "Filtered frames"
-mode_title[4] = "Reconstructed image"
+mode_title[4] = "Reconstructed image (abs)"
 mode_title[5] = "Reconstructed probe"
+mode_title[6] = "Reconstructed image (angle)"
 
 ## Start Qt event loop unless running in interactive mode.
 if __name__ == '__main__':
@@ -191,11 +218,14 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         mode = int(sys.argv[1])
         address = sys.argv[2]
+        save = sys.argv[3]
     else:
         address = "127.0.0.1:49206"
+        save = 0
 
     print("Mode {}".format(mode))
     print(address)
+    print(save)
 
     #-------------------
     app = QtGui.QApplication([])
@@ -228,9 +258,9 @@ if __name__ == '__main__':
     S = None
 
     if mode == 0 or mode == 1:
-        S = Framegrabber_viewer(address=address, mode = mode)
+        S = Framegrabber_viewer(address=address, mode = mode, save = save)
     else:
-        S = Viewer(view, address=address, mode = mode)
+        S = Viewer(view, address=address, mode = mode, save = save)
 
     S.framedata.connect(updateData)
     # P.start()
