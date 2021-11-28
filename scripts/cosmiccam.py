@@ -551,9 +551,7 @@ class Grabber(object):
 
         npath = str(nnpath)
 
-        if self.fname_h5 == '':
-
-            self.fname_h5 = os.path.split(npath)[0] + "/" + "raw_data.h5"
+        self.fname_h5 = os.path.split(npath)[0] + "/" + "raw_data.h5"
 
         scan = self.scan
 
@@ -708,13 +706,20 @@ if __name__=='__main__':
         G._thread.start()
 
     else:
-        G = Grabber(input_address = options["input_address"], output_address = options["output_address"], 
+    
+        run = True
+        while run:
+        
+            print("\nStarting a new scan processing...\n")
+        
+            G = Grabber(input_address = options["input_address"], output_address = options["output_address"], 
                     control_address = options["control_address"], mode = options["output_mode"])
-        G.prepare()
+            G.prepare()
 
-        while True:
-            # process pending events
-            G.QA.processEvents()
-            time.sleep(0.1)
-
+            while True:
+                # process pending events
+                G.QA.processEvents()
+                time.sleep(0.1)
+            print("\nScan processing completed\n")
+            run = options["keep_running"]
 

@@ -13,6 +13,7 @@ help =   "\nUsage: cosmiccam.py [options] 'input_address:port'\n\n\
 \t -c ADDRESS -> Set ADDRESS as 'IP:PORT' corresponding to the address of the control software.\n\
 \t\t\tDefaults to {}\n\
 \t -n -> Runs the code bypassing communication with the control software using predefined metadata.\n\
+\t -L -> Keep running and waiting for incoming scans. Off by default.\n\
 \n\n".format(default_output_address, default_control_address)
 
 def parse_arguments(args, options = None):
@@ -24,11 +25,12 @@ def parse_arguments(args, options = None):
                    "output_mode":"disk",
                    "output_address": default_output_address,
                    "control_address": default_control_address,
-                   "no_control": False}
+                   "no_control": False,
+                   "keep_running": False}
 
     try:
-        opts, args_left = getopt.getopt(args,"m:o:c:n", \
-                              ["output_mode=", "output_address=", "control_address=", "no_control"])
+        opts, args_left = getopt.getopt(args,"m:o:c:nL", \
+                              ["output_mode=", "output_address=", "control_address=", "no_control", "keep_running"])
 
     except getopt.GetoptError:
         print(help)
@@ -46,6 +48,8 @@ def parse_arguments(args, options = None):
             options["control_address"] = str(arg)
         if opt in ("-n", "--no_control"):
             options["no_control"] = True
+        if opt in ("-L", "--keep_running"):
+            options["keep_running"] = True 
 
 
     if len(args_left) != 1:
